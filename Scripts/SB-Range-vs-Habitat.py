@@ -77,22 +77,15 @@ def download_GAP_range_CONUS2001v1(gap_id, toDir):
     rngzipURL = item_json['files'][0]['url']
     r = requests.get(rngzipURL)
     z = zipfile.ZipFile(BytesIO(r.content))
-    #get_files = sb.get_item_files(item_json, toDir)
 
-    # Unzip
-    #rng_zip = toDir + item_json['files'][0]['name']
-    #zip_ref = zipfile.ZipFile(rng_zip, 'r')
     # Get ONLY the VAT dbf file and extract it to the designated directory
     rngCSV = [y for y in sorted(z.namelist()) for end in ['csv'] if y.endswith(end)]
     csvFile = z.extract(rngCSV[0], toDir)
-    #zip_ref.extractall(toDir)
     z.close()
     
     # Return the extracted range CSV
     return csvFile
 
-    # Return path to range file without extension
-    #return rng_zip.replace('.zip', '')
 ##############################################################################
 ##############################################################################
 def download_GAP_habmap_CONUS2001v1(gap_id, toDir):
@@ -120,7 +113,6 @@ def download_GAP_habmap_CONUS2001v1(gap_id, toDir):
     habzipURL = item_json['files'][2]['url']
     r = requests.get(habzipURL)
     z = zipfile.ZipFile(BytesIO(r.content))
-    #get_files = sb.get_item_files(item_json, toDir)
     
     # Set global Scientific and Common name variables from item JSON
     global CN 
@@ -128,19 +120,13 @@ def download_GAP_habmap_CONUS2001v1(gap_id, toDir):
     global SN
     SN = item_json['identifiers'][2]['key']
 
-    # Unzip
-    #hab_zip = toDir + item_json['files'][2]['name']
-    #zip_ref = zipfile.ZipFile(hab_zip, 'r')
     # Get ONLY the VAT dbf file and extract it to the designated directory
     habDBF = [y for y in sorted(z.namelist()) for end in ['dbf'] if y.endswith(end)]
     dbfFile = z.extract(habDBF[0], toDir)
     z.close()
-    #zip_ref.extractall(toDir)
-    #zip_ref.close()
 
     # Return path to VAT dbf file
     return dbfFile
-    #return hab_zip.replace('.zip', '')
 
 ##############################################################################
 
