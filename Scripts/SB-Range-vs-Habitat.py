@@ -20,6 +20,10 @@
     This uses the sciencebasepy package and local functions to download
     and unzip GAP range and habitat species data from ScienceBase.
     
+    It also requires a text file of 12-digit range HUCs (HUC12s.txt)
+    that contains data on each HUC's areal extent for calculating total
+    and proportional area of range extent.
+    
     OUTPUT CSV FILE NAME: SpeciesRangevsHabitat.csv
     
     The final CSV file will contain the following fields:
@@ -44,6 +48,10 @@
         numpy
         datetime (for calculating processing time)
         StringIO
+        BytesIO
+        Seaborn
+        requests
+        datetime
 
 
 @author: mjrubino
@@ -129,20 +137,113 @@ def download_GAP_habmap_CONUS2001v1(gap_id, toDir):
     return dbfFile
 
 ##############################################################################
+##############################################################################
+def GetHabitatArea(spcode, tDir):
+    
+    import glob
+    from simpledbf import Dbf5
 
-import glob, os, sys, shutil, sciencebasepy
+    ''' ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    Get HABITAT data based on species' model outputs from SB file downloads
+    '''
+    print("\n\n++++++++++++++ Running calculations based on HABITAT +++++++++++++++++\n")
+    
+    # Get the name of the raster VAT dbf file for data on the number
+    # of habitat cells in the species habitat map
+    habDBF = glob.glob(tDir + '{0}*tif.vat.dbf'.format(spcode))[0]
+    # Make it a dataframe using simpledbf
+    dbf = Dbf5(habDBF)
+    dfDBF = dbf.to_dataframe()
+    # Make sure all the column names are UPPERCASE - some vat dbf's have a mixture of cases
+    # Calculations using column names that aren't exact will throw a KeyError
+    dfDBF.columns = map(str.upper, dfDBF.columns)
+    
+    print("---> Calculating total habitat area and proportion ....")
+    # Make and empty data list for the species habitat count data
+    cntdata = []
+    # Calculate the km2 area for the species habitat count data
+    #  the proportion of CONUS and add the species code as index
+    cntsum = dfDBF['COUNT'].sum()
+    cntdata.append({'SpeciesCode':spcode,
+                    'AreaHab_km2':cntsum * 0.0009,
+                    'PropHab_CONUS':cntsum/cntLC
+                   })
+    # Append the data to a dataframe that will be joined with HUC 12 data
+    dfHabCounts = pd.DataFrame(data=cntdata)
+    dfHabCounts = dfHabCounts[['SpeciesCode','AreaHab_km2','PropHab_CONUS']]
+    dfHabArea = dfHabCounts.set_index(keys=['SpeciesCode'])
+   
+    return dfHabArea
+
+##############################################################################
+##############################################################################
+def GetRangeArea(spcode, tDir):
+    
+    import glob
+    
+    ''' ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    Get HUC range data from the Species Database from SB file downloads
+    '''
+    print("\n++++++++++++++ Running calculations based on RANGES +++++++++++++++++\n")
+    
+    # This gets the name of the extracted range CSV file
+    rangeCSV = glob.glob(tDir + '{0}*.csv'.format(spcode))[0]
+    # make it a dataframe
+    dfRangeCSV = pd.read_csv(rangeCSV,dtype={'strHUC12RNG':object},sep=',')
+    
+    # Pull in data from the HUC shapefile table (currently a static
+    #  text file located at D:/USGS Analyses/Richness/data/HUCs12.txt)
+    dfHUCsTable = pd.read_csv(HUCfile, dtype={'HUC12RNG':object},thousands=',',decimal='.')
+    # Add an area field calculated in km2
+    print("---> Calculating range area in km2 ....")
+    dfHUCsTable['AreaRange_km2'] = dfHUCsTable['Shape_Area']/1000000
+    # Drop some unnecessary fields
+    dfHUCsTable = dfHUCsTable.drop(['FID','HUC_10','HUC_12','HUC_8', 'OBJECTID',
+    'STATES','Shape_Area','Shape_Leng'], axis=1)
+    
+    # Now merge species range HUCs dataframe with HUC shapefile dataframe
+    dfSppHUCs = pd.merge(left=dfRangeCSV, right=dfHUCsTable, how='inner',
+     left_on='strHUC12RNG', right_on='HUC12RNG')
+    
+    # Get a row and column count from the above dataframe
+    # The number of rows is the total number of HUCs in the species' range
+    (r,c) = dfSppHUCs.shape
+    
+    # Sum the total area of each HUC (this is in km2)
+    sSum = dfSppHUCs.groupby(['strUC'])['AreaRange_km2'].sum()
+    dfRangeArea = pd.DataFrame(data=sSum)
+    dfRangeArea.index.name = 'SpeciesCode'
+    
+    # Add a scientific and common names   
+    dfRangeArea['ScientificName'] = SN
+    dfRangeArea['CommonName'] = CN
+    # Add a field with the total number of HUCs in the species' range
+    print("---> Calculating number of HUCs in species' range ....")
+    dfRangeArea['nHUCs'] = r
+    # Add a field to calculate the proportion of CONUS for the species' range
+    print("---> Calculating proportion of species' range in CONUS ....")
+    dfRangeArea['Prop_CONUS'] = dfRangeArea['AreaRange_km2']/CONUSArea
+    # Reorder columns
+    dfRangeArea = dfRangeArea[['ScientificName','CommonName',
+     'AreaRange_km2','nHUCs','Prop_CONUS']]
+    
+    return dfRangeArea
+
+##############################################################################
+
+
+import os, sys, shutil, sciencebasepy
 import pandas as pd
 import numpy as np
-from simpledbf import Dbf5
 from datetime import datetime
 from io import StringIO
 
+
 analysisDir = 'C:/Data/USGS Analyses/'
-richdataDir = analysisDir + 'Richness/data/'
-workDir = 'C:/Data/temp/'
+workDir = analysisDir + 'Range-vs-Habitat/'
 tempDir = workDir + 'downloadtemp/'
 # ****** Static Range HUCs Table **********
-HUCfile = richdataDir + 'HUC12s.txt'
+HUCfile = workDir + 'HUC12s.txt'
 
 starttime = datetime.now()
 timestamp = starttime.strftime('%Y-%m-%d')
@@ -157,6 +258,16 @@ else:
     os.mkdir(tempDir)
 
 
+'''
+    Function to write an error log if a species' ScienceBase
+    range or habitat file connection cannot be made
+'''
+log = workDir + 'Species-Data-Access-Error-Log.txt'
+def Log(content):
+    with open(log, 'a') as logDoc:
+        logDoc.write(content + '\n')
+
+# STATIC VARIABLES
 CONUSArea = 8103534.7   # 12-Digit HUC CONUS total area in km2
 nHUCs = 82717.0         # Number of 12-digit HUCS in CONUS
 cntLC = 9000763993.0    # Cell count of CONUS landcover excluding 0s
@@ -195,11 +306,12 @@ dfSppList = dfSppCSV[['GAP_code','scientific_name','common_name']]
 # Pull out species codes for looping over
 # NOTE: this is a series not a dataframe
 #sppCodeList = dfSppList['GAP_code']
+sppCodeList = ['mAKRAx']
 
 ## Here is a way to limit rows based on partial text strings in a column
 #   in this example, amphibians where the first letter in the 4 part code is B
 #sppCodeList = dfSppList[dfSppList['GAP_code'].str.contains("aB")==True]
-sppCodeList = ['aACSSx','aBESAx','aBLASx']
+
 
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 '''
@@ -212,115 +324,60 @@ sppCodeList = ['aACSSx','aBESAx','aBLASx']
 '''
 
 for sppCode in sppCodeList:
-    print('\n')    
-    print('*'*85)
-    print('RUNNING THE FOLLOWING SPECIES CODE  >>>',sppCode,'<<<' )
-    # Run the download GAP range function
-    print('\nRunning function to download GAP RANGE from ScienceBase\n' )
-    download_GAP_range_CONUS2001v1(sppCode, tempDir)
+    try:
+        
+        print('\n')    
+        print('*'*85)
+        print('RUNNING THE FOLLOWING SPECIES CODE  >>>',sppCode,'<<<' )
+        
+        # Run the download GAP range function
+        print('\nRunning function to download GAP RANGE from ScienceBase\n' )
+        download_GAP_range_CONUS2001v1(sppCode, tempDir)
+        
+        # Run the download GAP habitat map function
+        print('\nRunning function to download GAP HABITAT from ScienceBase\n' )
+        download_GAP_habmap_CONUS2001v1(sppCode, tempDir)
+        
+        '''
+        
+        Start manipulating the files in the download directory after
+        unzipping to get out the necessary information on range and habitat
+        
+        '''
+        # Run the GetHabitatArea function
+        dfHab = GetHabitatArea(sppCode, tempDir)
+        
+        # Run the GetRangeArea function
+        dfRange = GetRangeArea(sppCode, tempDir)
+        
+        # Merge the habitat dataframe returned from the GetHabitatArea function
+        # with the range dataframe returned from the GetRangeArea function
+        print("\nMerging Range-based and Habitat-based Dataframes ....\n")
+        dfMerge = pd.merge(left=dfRange, right=dfHab,
+                       how='inner', left_index=True, right_index=True)
+        # Add Log10 transformed area columns for range and habitat
+        dfMerge['LogAreaRange'] = np.log10(dfMerge['AreaRange_km2'])
+        dfMerge['LogAreaHabitat'] = np.log10(dfMerge['AreaHab_km2'])
+        
+        # Append to the master dataframe
+        dfMaster = dfMaster.append(dfMerge, ignore_index=False)
+        
+        # Delete the global scientific and common name variables to avoid overlap
+        del SN,CN
+        #del habDBF,dbf,dfDBF,rangeCSV,dfRangeCSV,dfHUCsTable,dfSppHUCs
+        #del r,c,sSum,dfSppSum, dfMerge
+        
+        # Delete the temporary download directory
+        if os.path.exists(tempDir):
+            shutil.rmtree(tempDir)
+            os.mkdir(tempDir)
+    
+    except:
+        print('\n!!!! Had Problems With Connections to ScienceBase. Moving on to Next Species ...!!!!')
+        Log(sppCode)
     
     
-    # Run the download GAP habitat map function
-    print('\nRunning function to download GAP HABITAT from ScienceBase\n' )
-    download_GAP_habmap_CONUS2001v1(sppCode, tempDir)
     
-    '''
-    
-    Start manipulating the files in the download directory after
-    unzipping to get out the necessary information on range and habitat
-    
-    '''
-    ''' ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    Get HABITAT data based on species' model outputs from SB file downloads
-    '''
-    print("\n\n++++++++++++++ Running calculations based on HABITAT +++++++++++++++++\n")
-    
-    # Get the name of the raster VAT dbf file for data on the number
-    # of habitat cells in the species habitat map
-    habDBF = glob.glob(tempDir + '{0}*tif.vat.dbf'.format(sppCode))[0]
-    # Make it a dataframe using simpledbf
-    dbf = Dbf5(habDBF)
-    dfDBF = dbf.to_dataframe()
-    # Make sure all the column names are UPPERCASE - some vat dbf's have a mixture of cases
-    # Calculations using column names that aren't exact will throw a KeyError
-    dfDBF.columns = map(str.upper, dfDBF.columns)
-    
-    print("---> Calculating total habitat area and proportion ....")
-    # Calculate the km2 area for the species habitat count data
-    #  the proportion of CONUS and add the species code as index
-    dfDBF['AreaHab_km2'] = dfDBF['COUNT'].sum() * 0.0009
-    dfDBF['PropHab_CONUS'] = dfDBF['COUNT'].sum()/cntLC
-    # Drop VALUE and COUNT fields
-    dfDBF = dfDBF.drop(['VALUE','COUNT'], axis=1)
-    dfDBF['SpeciesCode'] = sppCode
-    dfHab = dfDBF.set_index(keys=['SpeciesCode'])
-    
-    ''' ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    Get HUC range data from the Species Database from SB file downloads
-    '''
-    print("\n++++++++++++++ Running calculations based on RANGES +++++++++++++++++\n")
-    
-    # This gets the name of the extracted range CSV file
-    rangeCSV = glob.glob(tempDir + '{0}*.csv'.format(sppCode))[0]
-    # make it a dataframe
-    dfRangeCSV = pd.read_csv(rangeCSV,dtype={'strHUC12RNG':object},sep=',')
-    
-    # Pull in data from the HUC shapefile table (currently a static
-    #  text file located at D:/USGS Analyses/Richness/data/HUCs12.txt)
-    dfHUCsTable = pd.read_csv(HUCfile, dtype={'HUC12RNG':object},thousands=',',decimal='.')
-    # Add an area field calculated in km2
-    print("---> Calculating range area in km2 ....")
-    dfHUCsTable['AreaRange_km2'] = dfHUCsTable['Shape_Area']/1000000
-    # Drop some unnecessary fields
-    dfHUCsTable = dfHUCsTable.drop(['FID','HUC_10','HUC_12','HUC_8', 'OBJECTID',
-    'STATES','Shape_Area','Shape_Leng'], axis=1)
-    
-    # Now merge species range HUCs dataframe with HUC shapefile dataframe
-    dfSppHUCs = pd.merge(left=dfRangeCSV, right=dfHUCsTable, how='inner',
-     left_on='strHUC12RNG', right_on='HUC12RNG')
-    
-    # Get a row and column count from the above dataframe
-    # The number of rows is the total number of HUCs in the species' range
-    (r,c) = dfSppHUCs.shape
-    
-    # Sum the total area of each HUC (this is in km2)
-    sSum = dfSppHUCs.groupby(['strUC'])['AreaRange_km2'].sum()
-    dfSppSum = pd.DataFrame(data=sSum)
-    dfSppSum.index.name = 'SpeciesCode'
-    
-    # Add a scientific and common names   
-    dfSppSum['ScientificName'] = SN
-    dfSppSum['CommonName'] = CN
-    # Add a field with the total number of HUCs in the species' range
-    print("---> Calculating number of HUCs in species' range ....")
-    dfSppSum['nHUCs'] = r
-    # Add a field to calculate the proportion of CONUS for the species' range
-    print("---> Calculating proportion of species' range in CONUS ....")
-    dfSppSum['Prop_CONUS'] = dfSppSum['AreaRange_km2']/CONUSArea
-    # Reorder columns
-    dfSppSum = dfSppSum[['ScientificName','CommonName',
-     'AreaRange_km2','nHUCs','Prop_CONUS']]
-    
-    # Finally, merge with the master dataframe
-    print("\nMerging Range-based and Habitat-based Dataframes ....\n")
-    dfMerge = pd.merge(left=dfSppSum, right=dfHab,
-                   how='inner', left_index=True, right_index=True)
-    # Add Log10 transformed area columns for range and habitat
-    dfMerge['LogAreaRange'] = np.log10(dfMerge['AreaRange_km2'])
-    dfMerge['LogAreaHabitat'] = np.log10(dfMerge['AreaHab_km2'])
-    
-    # Append to the master dataframe
-    dfMaster = dfMaster.append(dfMerge, ignore_index=False)
-    
-    # Delete the global scientific and common name variables to avoid overlap
-    del SN,CN
-    del habDBF,dbf,dfDBF,rangeCSV,dfRangeCSV,dfHUCsTable,dfSppHUCs
-    del r,c,sSum,dfSppSum, dfMerge
-    
-    # Delete the temporary download directory
-    if os.path.exists(tempDir):
-        shutil.rmtree(tempDir)
-        os.mkdir(tempDir)
     
 # Export to CSV
 print('*'*85)
@@ -334,7 +391,48 @@ print("+"*35)
 print("Processing time: " + str(delta))
 print("+"*35)
 
+'''
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    
+Now start manipulating the dataframe to plot log areas for range and habitat
 
+'''
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+import statsmodels.api as sm
+
+
+## -- Pull out only the species code, log area range, and log area habitat
+# reset the index so the species code is no longer the index
+dfPlot = dfMaster[['LogAreaRange','LogAreaHabitat']].reset_index()
+
+# create a new Taxon column based on the first letter in the species code
+dfPlot['Taxon'] = np.where(dfPlot['SpeciesCode'].str[:1]=='a', 'Amphbians',
+		  np.where(dfPlot['SpeciesCode'].str[:1]=='b', 'Birds',
+		  np.where(dfPlot['SpeciesCode'].str[:1]=='m', 'Mammals', 'Reptiles')))
+
+
+a = sns.lmplot(x="LogAreaRange", y="LogAreaHabitat", 
+               hue="Taxon", data=dfPlot, fit_reg=False, legend=False,
+               markers=['o','v','s','D'], size=8,
+               scatter_kws={'s': 55})
+
+sns.regplot(x="LogAreaRange", y="LogAreaHabitat", 
+            data=dfPlot, scatter=False, ax=a.axes[0, 0],
+            line_kws={"color":"black","alpha":0.5,"lw":1})
+
+# Move the legend to an empty part of the plot
+lgd = plt.legend(loc='lower right', title='Taxon', prop={'size':12})
+lgd.get_title().set_fontsize(14)
+
+# Run an OLS regression of habitat and range and get an r-squared for the relationship
+lm = sm.OLS.from_formula(formula='LogAreaHabitat ~ LogAreaRange', data=dfPlot)
+result = lm.fit()
+print(result.summary())
+r2=result.rsquared
+print('\n The r-squared for log habitat area given log range area =', r2)
 
 
 
