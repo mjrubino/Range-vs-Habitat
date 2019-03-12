@@ -305,8 +305,8 @@ else:
 dfSppList = dfSppCSV[['GAP_code','scientific_name','common_name']]
 # Pull out species codes for looping over
 # NOTE: this is a series not a dataframe
-#sppCodeList = dfSppList['GAP_code']
-sppCodeList = ['mAKRAx']
+sppCodeList = dfSppList['GAP_code']
+#sppCodeList = ['aDNSAx']
 
 ## Here is a way to limit rows based on partial text strings in a column
 #   in this example, amphibians where the first letter in the 4 part code is B
@@ -407,6 +407,7 @@ import statsmodels.api as sm
 ## -- Pull out only the species code, log area range, and log area habitat
 # reset the index so the species code is no longer the index
 dfPlot = dfMaster[['LogAreaRange','LogAreaHabitat']].reset_index()
+#dfPlot = dfMaster[['AreaRange_km2','AreaHab_km2']].reset_index()
 
 # create a new Taxon column based on the first letter in the species code
 dfPlot['Taxon'] = np.where(dfPlot['SpeciesCode'].str[:1]=='a', 'Amphbians',
@@ -418,13 +419,25 @@ a = sns.lmplot(x="LogAreaRange", y="LogAreaHabitat",
                hue="Taxon", data=dfPlot, fit_reg=False, legend=False,
                markers=['o','v','s','D'], size=10,
                scatter_kws={'s': 55})
+#a = sns.lmplot(x="AreaRange_km2", y="AreaHab_km2", 
+#               hue="Taxon", data=dfPlot, fit_reg=False, legend=False,
+#               markers=['o','v','s','D'], size=10,
+#               scatter_kws={'s': 55})
 
 pax=sns.regplot(x="LogAreaRange", y="LogAreaHabitat", 
             data=dfPlot, scatter=False, ax=a.axes[0, 0],
             line_kws={"color":"black","alpha":0.5,"lw":1})
+#pax=sns.regplot(x="AreaRange_km2", y="AreaHab_km2", 
+#            data=dfPlot, scatter=False, ax=a.axes[0, 0],
+#            line_kws={"color":"black","alpha":0.5,"lw":1})
 
 pax.set_xlabel('log10 Range Area', fontsize=10)
 pax.set_ylabel('log10 Habitat Area', fontsize=10)
+
+#pax.set_xlabel('Range Area km2', fontsize=10)
+#pax.set_ylabel('Habitat Area km2', fontsize=10)
+#pax.set_xscale("log")
+#pax.set_yscale("log")
 
 # Move the legend to an empty part of the plot
 lgd = plt.legend(loc='lower right', title='Taxon', prop={'size':12})
