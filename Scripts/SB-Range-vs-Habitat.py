@@ -416,12 +416,15 @@ dfPlot['Taxon'] = np.where(dfPlot['SpeciesCode'].str[:1]=='a', 'Amphbians',
 
 a = sns.lmplot(x="LogAreaRange", y="LogAreaHabitat", 
                hue="Taxon", data=dfPlot, fit_reg=False, legend=False,
-               markers=['o','v','s','D'], size=8,
+               markers=['o','v','s','D'], size=10,
                scatter_kws={'s': 55})
 
-sns.regplot(x="LogAreaRange", y="LogAreaHabitat", 
+pax=sns.regplot(x="LogAreaRange", y="LogAreaHabitat", 
             data=dfPlot, scatter=False, ax=a.axes[0, 0],
             line_kws={"color":"black","alpha":0.5,"lw":1})
+
+pax.set_xlabel('log10 Range Area', fontsize=10)
+pax.set_ylabel('log10 Habitat Area', fontsize=10)
 
 # Move the legend to an empty part of the plot
 lgd = plt.legend(loc='lower right', title='Taxon', prop={'size':12})
