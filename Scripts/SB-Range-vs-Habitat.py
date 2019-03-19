@@ -50,9 +50,9 @@
         StringIO
         BytesIO
         Seaborn
+        skikit-learn (or sklearn)
         requests
         datetime
-        sklearn
 
 
 @author: mjrubino
