@@ -52,6 +52,7 @@
         Seaborn
         requests
         datetime
+        sklearn
 
 
 @author: mjrubino
@@ -59,6 +60,19 @@
 
 """
 
+##############################################################################
+def GetIndex(lst, k, v):
+    """
+    Gets the numeric index position of an item in a list
+    of dictionaries based on a value string for a given key
+    
+    """
+    for i, dic in enumerate(lst):
+        if dic[k] == v:
+            return i
+    return -1
+
+##############################################################################
 ##############################################################################
 def download_GAP_range_CONUS2001v1(gap_id, toDir):
     """
@@ -82,11 +96,19 @@ def download_GAP_range_CONUS2001v1(gap_id, toDir):
     # Get a public item.  No need to log in.
     rngID =  items['items'][0]['id']
     item_json = sb.get_item(rngID)
-    rngzipURL = item_json['files'][0]['url']
+    flst = item_json['files']
+    zname = '{0}_CONUS_Range_2001v1.zip'.format(gap_id)
+    # Use the GetIndex function to find the zip file's index value in the 
+    # JSON item's files list dictionaries of name keys
+    zip_index = GetIndex(flst,'name',zname)
+    # Here's a way to do this without using the GetIndex function created above
+    #zip_index=next((index for (index, d) in enumerate(flst) if d["name"] == zname), None)
+    # Get the URL to the zip file containing the HUC CSV
+    rngzipURL = item_json['files'][zip_index]['url']
     r = requests.get(rngzipURL)
     z = zipfile.ZipFile(BytesIO(r.content))
 
-    # Get ONLY the VAT dbf file and extract it to the designated directory
+    # Get ONLY the HUC CSV file and extract it to the designated directory
     rngCSV = [y for y in sorted(z.namelist()) for end in ['csv'] if y.endswith(end)]
     csvFile = z.extract(rngCSV[0], toDir)
     z.close()
@@ -118,7 +140,15 @@ def download_GAP_habmap_CONUS2001v1(gap_id, toDir):
     # Get a public item.  No need to log in.
     habID =  items['items'][0]['id']
     item_json = sb.get_item(habID)
-    habzipURL = item_json['files'][2]['url']
+    flst = item_json['files']
+    zname = '{0}_CONUS_HabMap_2001v1.zip'.format(gap_id)
+    # Use the GetIndex function to find the zip file's index value in the 
+    # JSON item's files list dictionaries of name keys
+    zip_index = GetIndex(flst,'name',zname)
+    # Here's a way to do this without using the GetIndex function created above
+    #zip_index=next((index for (index, d) in enumerate(flst) if d["name"] == zname), None)
+    # Get the URL to the zip file containing the VAT dbf
+    habzipURL = item_json['files'][zip_index]['url']
     r = requests.get(habzipURL)
     z = zipfile.ZipFile(BytesIO(r.content))
     
@@ -305,8 +335,8 @@ else:
 dfSppList = dfSppCSV[['GAP_code','scientific_name','common_name']]
 # Pull out species codes for looping over
 # NOTE: this is a series not a dataframe
-sppCodeList = dfSppList['GAP_code']
-#sppCodeList = ['aDNSAx']
+#sppCodeList = dfSppList['GAP_code']
+sppCodeList = ['bBLVUx','bWEVIx','mWSSKx']
 
 ## Here is a way to limit rows based on partial text strings in a column
 #   in this example, amphibians where the first letter in the 4 part code is B
@@ -378,12 +408,12 @@ for sppCode in sppCodeList:
     
     
     
-    
+'''   
 # Export to CSV
 print('*'*85)
 print('\nExporting to CSV: SpeciesRangevsHabitat.csv\n')
 dfMaster.to_csv(workDir + "SpeciesRangevsHabitat.csv")
-
+'''
 
 endtime = datetime.now()
 delta = endtime - starttime
@@ -402,6 +432,7 @@ Now start manipulating the dataframe to plot log areas for range and habitat
 import seaborn as sns
 import matplotlib.pyplot as plt
 import statsmodels.api as sm
+from sklearn.linear_model import LinearRegression
 
 
 ## -- Pull out only the species code, log area range, and log area habitat
@@ -410,7 +441,7 @@ dfPlot = dfMaster[['LogAreaRange','LogAreaHabitat']].reset_index()
 #dfPlot = dfMaster[['AreaRange_km2','AreaHab_km2']].reset_index()
 
 # create a new Taxon column based on the first letter in the species code
-dfPlot['Taxon'] = np.where(dfPlot['SpeciesCode'].str[:1]=='a', 'Amphbians',
+dfPlot['Taxon'] = np.where(dfPlot['SpeciesCode'].str[:1]=='a', 'Amphibians',
 		  np.where(dfPlot['SpeciesCode'].str[:1]=='b', 'Birds',
 		  np.where(dfPlot['SpeciesCode'].str[:1]=='m', 'Mammals', 'Reptiles')))
 
@@ -442,6 +473,46 @@ pax.set_ylabel('log10 Habitat Area', fontsize=10)
 # Move the legend to an empty part of the plot
 lgd = plt.legend(loc='lower right', title='Taxon', prop={'size':12})
 lgd.get_title().set_fontsize(14)
+
+
+### Make individual taxa subplots on a 2x2 figure ###
+
+fig, axs = plt.subplots(2, 2, figsize=(11, 11))
+axs = axs.flatten()
+fig.text(0.5, 0.04, 'log10 Range Area', ha='center', fontsize=14)
+fig.text(0.04, 0.5, 'log10 Habitat Area', va='center', rotation='vertical',fontsize=14)
+
+
+# Hard code a taxa list
+tlst = ['Amphibians', 'Birds', 'Mammals', 'Reptiles']
+# Make a list of markers
+mlst = ['o','v','s','D']
+# Add an iterator variable
+i=0
+for ax, t, m in zip(axs, tlst, mlst):
+
+    # Pull out the taxa specific data from dfPlot
+    dfT = dfPlot[dfPlot['Taxon']==t]
+    
+    # Set an axes title
+    ax.set_title(t)
+    
+    # Use the default color palette from Seaborn as variables
+    c = sns.color_palette()[i]
+    
+    # Plot a scatter plot and add a regression trend line
+    # Use the Seaborn colors in the plot with all taxa for individual taxa
+    ax.scatter(x=dfT['LogAreaRange'],y=dfT['LogAreaHabitat'],marker=m,c=c)
+    model = LinearRegression(fit_intercept=True)
+    model.fit(dfT['LogAreaRange'][:, np.newaxis], y = dfT['LogAreaHabitat'])
+    xfit = dfT['LogAreaRange']
+    yfit = model.predict(xfit[:, np.newaxis])
+    ax.plot(xfit, yfit,linewidth=1.5,color='black')
+    
+    i+=1
+
+del fig,axs,tlst,mlst,i,ax,t,m,dfT,c,xfit,yfit
+
 
 # Run an OLS regression of habitat and range and get an r-squared for the relationship
 lm = sm.OLS.from_formula(formula='LogAreaHabitat ~ LogAreaRange', data=dfPlot)
