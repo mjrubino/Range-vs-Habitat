@@ -407,7 +407,6 @@ for sppCode in sppCodeList:
         Log(sppCode)
     
     
-    
 
 # Export to CSV
 print('*'*85)
