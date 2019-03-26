@@ -151,12 +151,6 @@ def download_GAP_habmap_CONUS2001v1(gap_id, toDir):
     habzipURL = item_json['files'][zip_index]['url']
     r = requests.get(habzipURL)
     z = zipfile.ZipFile(BytesIO(r.content))
-    
-    # Set global Scientific and Common name variables from item JSON
-    global CN 
-    CN = item_json['identifiers'][1]['key']
-    global SN
-    SN = item_json['identifiers'][2]['key']
 
     # Get ONLY the VAT dbf file and extract it to the designated directory
     habDBF = [y for y in sorted(z.namelist()) for end in ['dbf'] if y.endswith(end)]
@@ -220,6 +214,10 @@ def GetRangeArea(spcode, tDir):
     rangeCSV = glob.glob(tDir + '{0}*.csv'.format(spcode))[0]
     # make it a dataframe
     dfRangeCSV = pd.read_csv(rangeCSV,dtype={'strHUC12RNG':object},sep=',')
+    # Select only known, possibly, or potentially present;
+    #             year-round, winter, or summer seasons
+    select={'intGapPres':[1,2,3], 'intGapSeas':[1,3,4]}
+    dfS1 = dfRangeCSV[dfRangeCSV[list(select)].isin(select).all(axis=1)]
     
     # Pull in data from the HUC shapefile table (currently a static
     #  text file located at D:/USGS Analyses/Richness/data/HUCs12.txt)
@@ -232,7 +230,7 @@ def GetRangeArea(spcode, tDir):
     'STATES','Shape_Area','Shape_Leng'], axis=1)
     
     # Now merge species range HUCs dataframe with HUC shapefile dataframe
-    dfSppHUCs = pd.merge(left=dfRangeCSV, right=dfHUCsTable, how='inner',
+    dfSppHUCs = pd.merge(left=dfS1, right=dfHUCsTable, how='inner',
      left_on='strHUC12RNG', right_on='HUC12RNG')
     
     # Get a row and column count from the above dataframe
@@ -244,9 +242,6 @@ def GetRangeArea(spcode, tDir):
     dfRangeArea = pd.DataFrame(data=sSum)
     dfRangeArea.index.name = 'SpeciesCode'
     
-    # Add a scientific and common names   
-    dfRangeArea['ScientificName'] = SN
-    dfRangeArea['CommonName'] = CN
     # Add a field with the total number of HUCs in the species' range
     print("---> Calculating number of HUCs in species' range ....")
     dfRangeArea['nHUCs'] = r
@@ -254,8 +249,7 @@ def GetRangeArea(spcode, tDir):
     print("---> Calculating proportion of species' range in CONUS ....")
     dfRangeArea['Prop_CONUS'] = dfRangeArea['AreaRange_km2']/CONUSArea
     # Reorder columns
-    dfRangeArea = dfRangeArea[['ScientificName','CommonName',
-     'AreaRange_km2','nHUCs','Prop_CONUS']]
+    dfRangeArea = dfRangeArea[['AreaRange_km2','nHUCs','Prop_CONUS']]
     
     return dfRangeArea
 
@@ -336,7 +330,7 @@ dfSppList = dfSppCSV[['GAP_code','scientific_name','common_name']]
 # Pull out species codes for looping over
 # NOTE: this is a series not a dataframe
 #sppCodeList = dfSppList['GAP_code']
-sppCodeList = ['bBLVUx','bWEVIx','mWSSKx']
+sppCodeList = ['mAHNSx']
 
 ## Here is a way to limit rows based on partial text strings in a column
 #   in this example, amphibians where the first letter in the 4 part code is B
@@ -360,6 +354,9 @@ for sppCode in sppCodeList:
         print('*'*85)
         print('RUNNING THE FOLLOWING SPECIES CODE  >>>',sppCode,'<<<' )
         
+        # Get the scientific and common names from the SB csv file
+        SN = dfSppCSV.loc[dfSppCSV['GAP_code']==sppCode,'scientific_name'].item()
+        CN = dfSppCSV.loc[dfSppCSV['GAP_code']==sppCode,'common_name'].item()
         # Run the download GAP range function
         print('\nRunning function to download GAP RANGE from ScienceBase\n' )
         download_GAP_range_CONUS2001v1(sppCode, tempDir)
@@ -385,6 +382,9 @@ for sppCode in sppCodeList:
         print("\nMerging Range-based and Habitat-based Dataframes ....\n")
         dfMerge = pd.merge(left=dfRange, right=dfHab,
                        how='inner', left_index=True, right_index=True)
+        # Add scientific and common names   
+        dfMerge['ScientificName'] = SN
+        dfMerge['CommonName'] = CN
         # Add Log10 transformed area columns for range and habitat
         dfMerge['LogAreaRange'] = np.log10(dfMerge['AreaRange_km2'])
         dfMerge['LogAreaHabitat'] = np.log10(dfMerge['AreaHab_km2'])
@@ -393,7 +393,7 @@ for sppCode in sppCodeList:
         dfMaster = dfMaster.append(dfMerge, ignore_index=False)
         
         # Delete the global scientific and common name variables to avoid overlap
-        del SN,CN
+        #del SN,CN
         #del habDBF,dbf,dfDBF,rangeCSV,dfRangeCSV,dfHUCsTable,dfSppHUCs
         #del r,c,sSum,dfSppSum, dfMerge
         
@@ -408,12 +408,12 @@ for sppCode in sppCodeList:
     
     
     
-'''   
+
 # Export to CSV
 print('*'*85)
 print('\nExporting to CSV: SpeciesRangevsHabitat.csv\n')
 dfMaster.to_csv(workDir + "SpeciesRangevsHabitat.csv")
-'''
+
 
 endtime = datetime.now()
 delta = endtime - starttime
@@ -520,6 +520,5 @@ result = lm.fit()
 print(result.summary())
 r2=result.rsquared
 print('\n The r-squared for log habitat area given log range area =', r2)
-
 
 
