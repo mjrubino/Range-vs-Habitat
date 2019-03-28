@@ -329,8 +329,8 @@ else:
 dfSppList = dfSppCSV[['GAP_code','scientific_name','common_name']]
 # Pull out species codes for looping over
 # NOTE: this is a series not a dataframe
-#sppCodeList = dfSppList['GAP_code']
-sppCodeList = ['mAHNSx']
+sppCodeList = dfSppList['GAP_code']
+#sppCodeList = ['aARSAx','rRBMTx']
 
 ## Here is a way to limit rows based on partial text strings in a column
 #   in this example, amphibians where the first letter in the 4 part code is B
@@ -419,6 +419,7 @@ delta = endtime - starttime
 print("+"*35)
 print("Processing time: " + str(delta))
 print("+"*35)
+
 
 '''
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -519,5 +520,4 @@ result = lm.fit()
 print(result.summary())
 r2=result.rsquared
 print('\n The r-squared for log habitat area given log range area =', r2)
-
 
