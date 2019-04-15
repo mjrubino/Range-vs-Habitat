@@ -43,6 +43,7 @@
         sciencebasepy
         glob
         zipfile
+        re
         pandas
         simpledbf
         numpy
@@ -56,7 +57,7 @@
 
 
 @author: mjrubino
-25 February 2019
+30 March 2019
 
 """
 
@@ -256,7 +257,7 @@ def GetRangeArea(spcode, tDir):
 ##############################################################################
 
 
-import os, sys, shutil, sciencebasepy
+import os, sys, shutil, sciencebasepy, re
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -304,16 +305,22 @@ dfMaster = pd.DataFrame()
     Connect to ScienceBase to pull down a species list
     This uses the ScienceBase item for species habitat maps
     and searches for a CSV file with species info in it.
-    The habitat map item has a unique id (527d0a83e4b0850ea0518326)
-    and the CSV file is named ScienceBaseHabMapCSV_20180713.csv. If
-    either of these change, the code will need to be re-written.
+    The habitat map item has a unique id (527d0a83e4b0850ea0518326).
+    If this changes, the code will need to be re-written.
 
 '''
 sb = sciencebasepy.SbSession()
 habmapItem = sb.get_item("527d0a83e4b0850ea0518326")
+# Make a regular expression variable for the hab map csv file name pattern
+fnp = 'ScienceBaseHabMapCSV.+'
 for file in habmapItem["files"]:
-    if file["name"] == "ScienceBaseHabMapCSV_20180713.csv":
-        dfSppCSV = pd.read_csv(StringIO(sb.get(file["url"])))
+    # Search for the file name pattern in the hab map item files dictionary
+    fnMatch = re.search(fnp, file['name'])
+    if fnMatch != None:
+        try:
+            dfSppCSV = pd.read_csv(StringIO(sb.get(file["url"])))
+        except:
+            print('!! Could not find a CSV file name match !!')
 
 
 # Check to make sure the CSV file was returned
